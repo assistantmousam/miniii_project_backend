@@ -1,40 +1,28 @@
+
 from fastapi import FastAPI
-from sqlalchemy import text
 
-
-
-from app.db.database import engine
+from app.api.auth import router as auth_router
+from app.core.config import settings
 
 
 app = FastAPI(
-    title="DSA Arcade API",
-    description="Backend API for the DSA Arcade gamified DSA learning platform",
-    version="1.0.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
 )
 
 
 @app.get("/")
 def root():
     return {
-        "message": "Welcome to DSA Arcade API",
-        "status": "running",
+        "message": "DSA Arcade API is running"
     }
 
 
 @app.get("/health")
-def health_check():
+def health():
     return {
-        "status": "healthy",
+        "status": "healthy"
     }
 
 
-@app.get("/health/database")
-def database_health_check():
-    with engine.connect() as connection:
-        result = connection.execute(text("SELECT 1"))
-        value = result.scalar()
-
-    return {
-        "database": "connected",
-        "result": value,
-    }
+app.include_router(auth_router)
