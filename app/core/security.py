@@ -1,3 +1,4 @@
+
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
@@ -12,6 +13,7 @@ from app.db.database import get_db
 from app.models.user import User
 
 
+# Password hashing
 pwd_context = CryptContext(
     schemes=["bcrypt"],
     deprecated="auto",
@@ -32,6 +34,7 @@ def verify_password(
     )
 
 
+# Access token
 def create_access_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -50,6 +53,7 @@ def create_access_token(user_id: str) -> str:
     )
 
 
+# Refresh token
 def create_refresh_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         days=settings.REFRESH_TOKEN_EXPIRE_DAYS
@@ -68,11 +72,13 @@ def create_refresh_token(user_id: str) -> str:
     )
 
 
+# OAuth2 Bearer token
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/v1/auth/login"
 )
 
 
+# Get currently authenticated user
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
@@ -81,7 +87,9 @@ def get_current_user(
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={
+            "WWW-Authenticate": "Bearer"
+        },
     )
 
     try:
@@ -94,14 +102,19 @@ def get_current_user(
         user_id = payload.get("sub")
         token_type = payload.get("type")
 
-        if user_id is None or token_type != "access":
+        if user_id is None:
             raise credentials_exception
 
-    except JWTError:
-        raise credentials_exception
+        if token_type != "access":
+            raise credentials_exception
+
+    except JWTError as exc:
+        raise credentials_exception from exc
 
     user = db.scalar(
-        select(User).where(User.id == user_id)
+        select(User).where(
+            User.id == user_id
+        )
     )
 
     if user is None:
@@ -114,3 +127,4 @@ def get_current_user(
         )
 
     return user
+

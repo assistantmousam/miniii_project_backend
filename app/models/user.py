@@ -91,10 +91,18 @@ class User(Base):
     progress = relationship(
         "UserProgress",
         back_populates="user",
+        cascade="all, delete-orphan",
     )
 
     score = relationship(
         "UserScore",
         back_populates="user",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    qotd_attempts = relationship(
+        "QotDAttempt",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )
