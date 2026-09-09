@@ -7,6 +7,9 @@ from app.api.game import router as game_router
 from app.api.qotd import router as qotd_router
 from app.api.leaderboard import router as leaderboard_router
 from app.api.notifications import router as notifications_router
+from app.api.admin_users import router as admin_users_router
+from app.api.admin_audit import router as admin_audit_router
+
 from app.core.config import settings
 
 
@@ -37,4 +40,5 @@ app.include_router(game_router)
 app.include_router(qotd_router)
 app.include_router(leaderboard_router)
 app.include_router(notifications_router)
-
+app.include_router(admin_users_router)
+app.include_router(admin_audit_router)
