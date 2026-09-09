@@ -6,6 +6,10 @@ from app.models.user_score import UserScore
 from app.models.question import Question
 from app.models.qotd_attempt import QotDAttempt
 from app.models.streak import Streak
+from app.models.leaderboard_snapshot import LeaderboardSnapshot
+from app.models.notification import Notification
+from app.models.audit_log import AuditLog
+
 
 __all__ = [
     "User",
@@ -16,4 +20,7 @@ __all__ = [
     "Question",
     "QotDAttempt",
     "Streak",
+    "LeaderboardSnapshot",
+    "Notification",
+    "AuditLog",
 ]

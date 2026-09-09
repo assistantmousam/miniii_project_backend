@@ -1,4 +1,5 @@
 import uuid
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String, Text, func
@@ -88,21 +89,29 @@ class User(Base):
         nullable=False,
     )
 
+    # User progress
     progress = relationship(
         "UserProgress",
         back_populates="user",
-        cascade="all, delete-orphan",
     )
 
+    # User score
     score = relationship(
         "UserScore",
         back_populates="user",
         uselist=False,
+    )
+
+    # Question of the day attempts
+    qotd_attempts = relationship(
+        "QotDAttempt",
+        back_populates="user",
         cascade="all, delete-orphan",
     )
 
-    qotd_attempts = relationship(
-        "QotDAttempt",
+    # Notifications
+    notifications = relationship(
+        "Notification",
         back_populates="user",
         cascade="all, delete-orphan",
     )
