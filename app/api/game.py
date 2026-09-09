@@ -1,20 +1,26 @@
+
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.database import get_db
 from app.models.user import User
+
 from app.schemas.game import (
     HintResponse,
     LevelResponse,
     SolutionResponse,
     StageResponse,
     StartStageResponse,
-    SubmitStageRequest,
-    SubmitStageResponse,
 )
+
+from app.schemas.scoring import (
+    StageScoreResponse,
+    StageSubmissionRequest,
+)
+
 from app.services.game_service import (
     get_all_levels,
     get_level_by_id,
@@ -23,8 +29,9 @@ from app.services.game_service import (
     is_level_unlocked,
     is_stage_unlocked,
     start_stage,
-    submit_stage,
 )
+
+from app.services.scoring_service import process_stage_score
 
 
 router = APIRouter(
@@ -64,18 +71,13 @@ def get_levels(
     ]
 
 
-@router.get(
-    "/levels/{level_id}",
-)
+@router.get("/levels/{level_id}")
 def get_level(
     level_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    level = get_level_by_id(
-        db,
-        level_id,
-    )
+    level = get_level_by_id(db, level_id)
 
     if level is None:
         raise HTTPException(
@@ -83,13 +85,11 @@ def get_level(
             detail="Level not found",
         )
 
-    unlocked = is_level_unlocked(
+    if not is_level_unlocked(
         db,
         current_user.id,
         level,
-    )
-
-    if not unlocked:
+    ):
         raise HTTPException(
             status_code=403,
             detail="Level is locked",
@@ -138,10 +138,7 @@ def get_stage(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    stage = get_stage_by_id(
-        db,
-        stage_id,
-    )
+    stage = get_stage_by_id(db, stage_id)
 
     if stage is None:
         raise HTTPException(
@@ -184,10 +181,7 @@ def start_game_stage(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    stage = get_stage_by_id(
-        db,
-        stage_id,
-    )
+    stage = get_stage_by_id(db, stage_id)
 
     if stage is None:
         raise HTTPException(
@@ -219,71 +213,6 @@ def start_game_stage(
 
 
 @router.post(
-    "/stages/{stage_id}/submit",
-    response_model=SubmitStageResponse,
-)
-def submit_game_stage(
-    stage_id: UUID,
-    data: SubmitStageRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    stage = get_stage_by_id(
-        db,
-        stage_id,
-    )
-
-    if stage is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Stage not found",
-        )
-
-    if not is_stage_unlocked(
-        db,
-        current_user.id,
-        stage,
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Stage is locked",
-        )
-
-    progress = get_user_stage_progress(
-        db,
-        current_user.id,
-        stage.id,
-    )
-
-    if progress is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Start the stage before submitting",
-        )
-
-    score, passed = submit_stage(
-        db,
-        progress,
-        stage,
-        data.answer,
-        data.time_taken,
-        data.hints_used,
-    )
-
-    return SubmitStageResponse(
-        stage_id=str(stage.id),
-        status=progress.status,
-        score=score,
-        passed=passed,
-        message=(
-            "Stage completed successfully"
-            if passed
-            else "Stage failed. You can retry."
-        ),
-    )
-
-
-@router.post(
     "/stages/{stage_id}/hint",
     response_model=HintResponse,
 )
@@ -292,10 +221,7 @@ def get_hint(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    stage = get_stage_by_id(
-        db,
-        stage_id,
-    )
+    stage = get_stage_by_id(db, stage_id)
 
     if stage is None:
         raise HTTPException(
@@ -331,10 +257,8 @@ def get_hint(
             detail="Maximum hints reached",
         )
 
-    hints = stage.challenge_data.get(
-        "hints",
-        [],
-    )
+    challenge_data = stage.challenge_data or {}
+    hints = challenge_data.get("hints", [])
 
     hint_number = progress.hints_used + 1
 
@@ -365,10 +289,7 @@ def get_solution(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    stage = get_stage_by_id(
-        db,
-        stage_id,
-    )
+    stage = get_stage_by_id(db, stage_id)
 
     if stage is None:
         raise HTTPException(
@@ -392,3 +313,93 @@ def get_solution(
         stage_id=str(stage.id),
         solution_data=stage.solution_data or {},
     )
+
+
+@router.post(
+    "/stages/{stage_id}/submit",
+    response_model=StageScoreResponse,
+)
+def submit_game_stage(
+    stage_id: UUID,
+    data: StageSubmissionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    stage = get_stage_by_id(db, stage_id)
+
+    if stage is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Stage not found",
+        )
+
+    if not is_stage_unlocked(
+        db,
+        current_user.id,
+        stage,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Stage is locked",
+        )
+
+    progress = get_user_stage_progress(
+        db,
+        current_user.id,
+        stage.id,
+    )
+
+    if progress is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Start the stage before submitting",
+        )
+
+    if progress.status == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Stage already completed",
+        )
+
+    challenge_data = stage.challenge_data or {}
+
+    expected_answer = challenge_data.get(
+        "correct_answer"
+    )
+
+    is_correct = (
+        data.answer == expected_answer
+    )
+
+    progress.attempts += 1
+
+    (
+        breakdown,
+        xp_earned,
+        user_score,
+    ) = process_stage_score(
+        db=db,
+        user_id=current_user.id,
+        progress=progress,
+        stage=stage,
+        is_correct=is_correct,
+        time_taken=data.time_taken,
+        operations_used=data.operations_used,
+    )
+
+    return StageScoreResponse(
+        stage_id=str(stage.id),
+        status=progress.status,
+        passed=progress.status == "completed",
+        score=breakdown["total_score"],
+        score_breakdown=breakdown,
+        xp_earned=xp_earned,
+        total_xp=user_score.xp,
+        player_level=user_score.player_level,
+        message=(
+            "Stage completed successfully"
+            if progress.status == "completed"
+            else "Stage failed. You can retry."
+        ),
+    )
+

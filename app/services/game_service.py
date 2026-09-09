@@ -1,3 +1,4 @@
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,7 +10,6 @@ from app.models.user_progress import UserProgress
 def get_all_levels(
     db: Session,
 ) -> list[GameLevel]:
-
     return db.scalars(
         select(GameLevel)
         .where(GameLevel.is_active.is_(True))
@@ -21,7 +21,6 @@ def get_level_by_id(
     db: Session,
     level_id,
 ) -> GameLevel | None:
-
     return db.scalar(
         select(GameLevel).where(
             GameLevel.id == level_id,
@@ -34,7 +33,6 @@ def get_stage_by_id(
     db: Session,
     stage_id,
 ) -> GameStage | None:
-
     return db.scalar(
         select(GameStage).where(
             GameStage.id == stage_id
@@ -47,7 +45,6 @@ def get_user_stage_progress(
     user_id,
     stage_id,
 ) -> UserProgress | None:
-
     return db.scalar(
         select(UserProgress).where(
             UserProgress.user_id == user_id,
@@ -61,14 +58,15 @@ def is_level_unlocked(
     user_id,
     level: GameLevel,
 ) -> bool:
-
     # Level 1 is always unlocked.
     if level.level_number == 1:
         return True
 
     previous_level = db.scalar(
         select(GameLevel).where(
-            GameLevel.level_number == level.level_number - 1
+            GameLevel.level_number
+            == level.level_number - 1,
+            GameLevel.is_active.is_(True),
         )
     )
 
@@ -84,12 +82,16 @@ def is_level_unlocked(
     if not stages:
         return False
 
+    # The previous level is unlocked only when
+    # all of its stages are completed.
     completed_count = db.scalar(
-        select(UserProgress.id).where(
+        select(UserProgress.id)
+        .where(
             UserProgress.user_id == user_id,
             UserProgress.level_id == previous_level.id,
             UserProgress.status == "completed",
-        ).limit(1)
+        )
+        .limit(1)
     )
 
     return completed_count is not None
@@ -100,7 +102,6 @@ def is_stage_unlocked(
     user_id,
     stage: GameStage,
 ) -> bool:
-
     level = get_level_by_id(
         db,
         stage.level_id,
@@ -123,7 +124,8 @@ def is_stage_unlocked(
     previous_stage = db.scalar(
         select(GameStage).where(
             GameStage.level_id == stage.level_id,
-            GameStage.stage_number == stage.stage_number - 1,
+            GameStage.stage_number
+            == stage.stage_number - 1,
         )
     )
 
@@ -150,7 +152,6 @@ def start_stage(
     user_id,
     stage: GameStage,
 ) -> UserProgress:
-
     progress = get_user_stage_progress(
         db,
         user_id,
@@ -173,7 +174,14 @@ def start_stage(
         db.add(progress)
 
     else:
+        # Do not reset an already completed stage.
+        if progress.status == "completed":
+            return progress
+
         progress.status = "in_progress"
+        progress.score = 0
+        progress.hints_used = 0
+        progress.time_taken = 0
 
     db.commit()
     db.refresh(progress)
@@ -194,8 +202,9 @@ def submit_stage(
     progress.time_taken = time_taken
     progress.hints_used = hints_used
 
-    # Basic answer validation.
-    expected_answer = stage.challenge_data.get(
+    challenge_data = stage.challenge_data or {}
+
+    expected_answer = challenge_data.get(
         "correct_answer"
     )
 
@@ -206,7 +215,6 @@ def submit_stage(
 
         # 10 points penalty for each hint.
         score -= hints_used * 10
-
         score = max(score, 0)
 
         progress.score = score
@@ -216,6 +224,8 @@ def submit_stage(
 
         if score >= stage.passing_score:
             progress.status = "completed"
+        else:
+            progress.status = "failed"
 
     else:
         score = 0
@@ -226,3 +236,4 @@ def submit_stage(
     db.refresh(progress)
 
     return score, is_correct
+
