@@ -1,9 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.core.rate_limit import (
+    check_login_rate_limit,
+    check_register_rate_limit,
+)
 from app.db.database import get_db
-from app.schemas.auth import RegisterRequest, UserResponse
-from app.services.auth_service import register_user
+from app.schemas.auth import (
+    RegisterRequest,
+    UserResponse,
+    LoginRequest,
+    TokenResponse,
+)
+from app.services.auth_service import (
+    register_user,
+    login_user,
+)
 
 
 router = APIRouter(
@@ -19,10 +32,25 @@ router = APIRouter(
 )
 def register(
     data: RegisterRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    client_ip = (
+        request.client.host
+        if request.client
+        else "unknown"
+    )
+
+    check_register_rate_limit(
+        key=client_ip,
+        max_attempts=settings.RATE_LIMIT_REGISTER,
+    )
+
     try:
-        user = register_user(db, data)
+        user = register_user(
+            db,
+            data,
+        )
 
         return UserResponse(
             id=str(user.id),
@@ -39,3 +67,29 @@ def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+)
+def login(
+    data: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    client_ip = (
+        request.client.host
+        if request.client
+        else "unknown"
+    )
+
+    check_login_rate_limit(
+        key=client_ip,
+        max_attempts=settings.RATE_LIMIT_LOGIN,
+    )
+
+    return login_user(
+        db=db,
+        data=data,
+    )

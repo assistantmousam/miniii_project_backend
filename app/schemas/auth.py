@@ -25,7 +25,6 @@ class RegisterRequest(BaseModel):
             raise ValueError(
                 "Username can contain only letters, numbers and underscore"
             )
-
         return value
 
     @field_validator("password")
@@ -62,3 +61,20 @@ class UserResponse(BaseModel):
     role: str
     is_verified: bool
     is_active: bool
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+# LOGIN
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1)
+
+
+# JWT TOKEN RESPONSE
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
