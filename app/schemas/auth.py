@@ -11,6 +11,7 @@ class RegisterRequest(BaseModel):
 
     password: str = Field(
         min_length=8,
+        max_length=72,
     )
 
     display_name: str | None = Field(
@@ -21,10 +22,16 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def validate_username(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Username cannot be empty")
+
         if not value.replace("_", "").isalnum():
             raise ValueError(
                 "Username can contain only letters, numbers and underscore"
             )
+
         return value
 
     @field_validator("password")
@@ -67,13 +74,11 @@ class UserResponse(BaseModel):
     }
 
 
-# LOGIN
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, max_length=72)
 
 
-# JWT TOKEN RESPONSE
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

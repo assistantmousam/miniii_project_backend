@@ -1,27 +1,19 @@
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self,
-        request: Request,
-        call_next,
-    ):
+
+    async def dispatch(self, request, call_next):
         response = await call_next(request)
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = (
-            "geolocation=(), microphone=(), camera=()"
+            "camera=(), microphone=(), geolocation=()"
         )
 
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "img-src 'self' data: https:; "
-            "style-src 'self' 'unsafe-inline'; "
-            "script-src 'self'"
-        )
+        # Temporarily disabled because it can block Swagger UI.
+        # We will add a production-safe CSP later.
 
         return response

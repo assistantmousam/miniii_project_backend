@@ -12,8 +12,13 @@ from app.db.database import get_db
 from app.models.user import User
 
 
+# ============================================================
+# PASSWORD HASHING
+# ============================================================
+
 pwd_context = CryptContext(
     schemes=["bcrypt"],
+    bcrypt__rounds=12,
     deprecated="auto",
 )
 
@@ -31,6 +36,10 @@ def verify_password(
         hashed_password,
     )
 
+
+# ============================================================
+# ACCESS TOKEN
+# ============================================================
 
 def create_access_token(user_id: str) -> str:
     now = datetime.now(timezone.utc)
@@ -53,6 +62,10 @@ def create_access_token(user_id: str) -> str:
     )
 
 
+# ============================================================
+# REFRESH TOKEN
+# ============================================================
+
 def create_refresh_token(user_id: str) -> str:
     now = datetime.now(timezone.utc)
 
@@ -74,44 +87,67 @@ def create_refresh_token(user_id: str) -> str:
     )
 
 
+# ============================================================
+# OAUTH2
+# ============================================================
+
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/api/v1/auth/login"
 )
 
 
+# ============================================================
+# GET CURRENT USER
+# ============================================================
+
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={
+            "WWW-Authenticate": "Bearer"
+        },
     )
 
     try:
+        # Decode JWT
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
 
+        # Get user ID
         user_id = payload.get("sub")
+
+        # Get token type
         token_type = payload.get("type")
 
-        if user_id is None or token_type != "access":
+        # User ID must exist
+        if not user_id:
+            raise credentials_exception
+
+        # Only ACCESS tokens can access protected endpoints
+        if token_type != "access":
             raise credentials_exception
 
     except JWTError as exc:
         raise credentials_exception from exc
 
+    # Find user in database
     user = db.scalar(
         select(User).where(User.id == user_id)
     )
 
+    # User does not exist
     if user is None:
         raise credentials_exception
 
+    # Account is disabled
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
