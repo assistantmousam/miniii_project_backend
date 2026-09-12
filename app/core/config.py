@@ -1,27 +1,3 @@
-# from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-# class Settings(BaseSettings):
-#     APP_NAME: str = "DSA Arcade API"
-#     APP_VERSION: str = "1.0.0"
-#     DEBUG: bool = True
-
-#     DATABASE_URL: str
-
-#     JWT_SECRET_KEY: str
-#     JWT_ALGORITHM: str = "HS256"
-
-#     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-#     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-#     model_config = SettingsConfigDict(
-#         env_file=".env",
-#         env_file_encoding="utf-8",
-#         extra="ignore",
-#     )
-
-
-# settings = Settings()
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +10,6 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
@@ -46,6 +21,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_REGISTER: int = 3
 
     INACTIVITY_TIMEOUT_MINUTES: int = 30
+
+    # Redis / Celery
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    CELERY_TIMEZONE: str = "UTC"
 
     model_config = SettingsConfigDict(
         env_file=".env",

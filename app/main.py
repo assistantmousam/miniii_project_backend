@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
@@ -14,6 +15,7 @@ from app.api.admin_analytics import router as admin_analytics_router
 
 from app.core.config import settings
 from app.core.security_middleware import SecurityHeadersMiddleware
+from app.db.database import SessionLocal
 
 
 app = FastAPI(
@@ -21,6 +23,10 @@ app = FastAPI(
     version=settings.APP_VERSION,
 )
 
+
+# =========================
+# Basic API
+# =========================
 
 @app.get("/")
 def root():
@@ -35,6 +41,37 @@ def health():
         "status": "healthy"
     }
 
+
+# =========================
+# Database Health
+# =========================
+
+@app.get("/health/database")
+def database_health():
+    db = SessionLocal()
+
+    try:
+        db.execute(text("SELECT 1"))
+
+        return {
+            "status": "ok",
+            "database": "connected",
+        }
+
+    except Exception as exc:
+        return {
+            "status": "error",
+            "database": "disconnected",
+            "detail": str(exc),
+        }
+
+    finally:
+        db.close()
+
+
+# =========================
+# CORS
+# =========================
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,12 +92,18 @@ app.add_middleware(
 )
 
 
+# =========================
+# Security Headers
+# =========================
+
 app.add_middleware(
     SecurityHeadersMiddleware,
 )
 
 
-# Include API routers
+# =========================
+# API Routers
+# =========================
 
 app.include_router(auth_router)
 app.include_router(users_router)
@@ -68,6 +111,7 @@ app.include_router(game_router)
 app.include_router(qotd_router)
 app.include_router(leaderboard_router)
 app.include_router(notifications_router)
+
 app.include_router(admin_users_router)
 app.include_router(admin_audit_router)
 app.include_router(admin_game_router)
