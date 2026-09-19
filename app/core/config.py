@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     APP_NAME: str = "DSA Arcade API"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     DATABASE_URL: str
 
@@ -22,7 +22,6 @@ class Settings(BaseSettings):
 
     INACTIVITY_TIMEOUT_MINUTES: int = 30
 
-    # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     CELERY_TIMEZONE: str = "UTC"

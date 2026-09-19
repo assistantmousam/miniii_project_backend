@@ -1,6 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+
+from app.core.config import settings
+from app.core.security_middleware import SecurityHeadersMiddleware
+from app.db.database import SessionLocal
 
 from app.api.auth import router as auth_router
 from app.api.users import router as users_router
@@ -13,10 +17,10 @@ from app.api.admin_audit import router as admin_audit_router
 from app.api.admin_game import router as admin_game_router
 from app.api.admin_analytics import router as admin_analytics_router
 
-from app.core.config import settings
-from app.core.security_middleware import SecurityHeadersMiddleware
-from app.db.database import SessionLocal
 
+# =========================
+# FastAPI Application
+# =========================
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -59,11 +63,14 @@ def database_health():
         }
 
     except Exception as exc:
-        return {
-            "status": "error",
-            "database": "disconnected",
-            "detail": str(exc),
-        }
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "error",
+                "database": "disconnected",
+                "message": str(exc),
+            },
+        ) from exc
 
     finally:
         db.close()
@@ -111,7 +118,6 @@ app.include_router(game_router)
 app.include_router(qotd_router)
 app.include_router(leaderboard_router)
 app.include_router(notifications_router)
-
 app.include_router(admin_users_router)
 app.include_router(admin_audit_router)
 app.include_router(admin_game_router)
