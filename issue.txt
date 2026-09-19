@@ -1,0 +1,232 @@
+DSA Arcade Backend - Bug and Issue Audit
+Project: miniii_project_backend (FastAPI + SQLAlchemy + Alembic + Celery/Redis)
+Generated: 2026-09-19
+Location: C:\Users\main\Desktop\miniii_project_backend\issue.txt
+================================================================
+
+SUMMARY:
+- Critical: 13 (runtime blockers, security bypass, data corruption)
+- High: 19 (likely 500s, wrong data, auth gaps)
+- Medium: 13 (config, contract, maintainability)
+- Low: 7 (hygiene, placeholders)
+- Total: 52
+
+================================================================
+CRITICAL (runtime blocker / data corruption / security bypass)
+================================================================
+
+[C1] requirements.txt:27 - package_name==0.1 placeholder
+  - pip install -r requirements.txt fails with "No matching distribution".
+  - Blocks all installs and Docker builds. Remove line.
+
+[C2] requirements.txt:31-33,39 - DB driver conflict
+  - psycopg==3.3.5 + psycopg-binary==3.3.5 are same distribution (conflict).
+  - psycopg2-binary==2.9.12 (psycopg v2) vs psycopg v3 need different DATABASE_URL schemes.
+  - PyMySQL==1.2.0 (MySQL) incompatible with models using postgresql UUID/JSONB/ARRAY (app/models/*.py).
+  - Fix: keep one: psycopg-binary for Postgres. Remove others. Use URL postgresql+psycopg://.
+
+[C3] requirements.txt:23,42 + app/core/security.py:5 - JWT lib conflict
+  - jose==1.0.0 (dead standalone jose) + python-jose==3.5.0 both pin top-level `jose`.
+  - Code does `from jose import JWTError, jwt`. Resolver picks wrong lib -> JWT breaks.
+  - Fix: keep only python-jose[cryptography] or switch to PyJWT.
+
+[C4] requirements.txt:6,29 + app/core/security.py:19-23 - bcrypt/passlib incompat
+  - bcrypt==4.0.1 + passlib==1.7.4 incompatible.
+  - Classic error: AttributeError: module 'bcrypt' has no attribute '__about__' on pwd_context.hash().
+  - Register/login 500. Fix: bcrypt<4.1 or replace passlib with pwdlib/bcrypt direct.
+
+[C5] requirements.txt:18,48 - FastAPI/Starlette incompat
+  - fastapi==0.141.1 + starlette==1.6.0 incompatible. FastAPI 0.141 expects starlette 0.40/0.41.x.
+  - Breaks CORSMiddleware/router imports at startup. Fix: let FastAPI pin starlette, remove explicit pin.
+
+[C6] app/core/config.py:9,11,44 - Required settings with no default
+  - DATABASE_URL:str and JWT_SECRET_KEY:str required, settings=Settings() at import.
+  - Missing .env raises ValidationError on import app.main / alembic env.py / celery_app.py.
+  - No .env.example in repo. Fix: add .env.example, document, or fail with clear message.
+
+[C7] app/core/security.py:142-144 + app/models/user.py:15-19 - UUID vs str compare
+  - User.id is UUID(as_uuid=True) PK, but user_id from JWT sub is str.
+  - `User.id == user_id` -> Postgres UUID != text, no row / invalid input syntax for uuid.
+  - All get_current_user -> 401. Fix: uuid.UUID(user_id) with try/except.
+
+[C8] app/services/game_service.py:87-97 - is_level_unlocked bypass
+  - Checks .limit(1) single completed row but comment says "all stages".
+  - Completing any 1 stage unlocks next level. Must count(completed)==count(stages).
+  - Also ignores GameLevel.unlock_requires FK, uses level_number-1 heuristic.
+
+[C9] app/api/notifications.py:76-109 - /read-all shadowed
+  - PATCH /{notification_id}/read defined before PATCH /read-all.
+  - Request to /api/v1/notifications/read-all matches notification_id=read-all -> 422 UUID parse.
+  - mark_all_read unreachable. Fix: define /read-all first.
+
+[C10] app/api/auth.py:76-95 - login unhandled ValueError
+  - login() has no try/except ValueError (unlike register).
+  - login_user()->authenticate_user raises ValueError -> unhandled 500 instead of 401/403.
+
+[C11] app/services/qotd_service.py:118-129 + app/models/qotd_attempt.py:11-12 - missing unique constraint
+  - No UniqueConstraint(user_id, attempt_date). Duplicate guard is app-only.
+  - Race creates two rows same day. Fix: add DB constraint.
+
+[C12] app/services/qotd_service.py:82-115 - get_today_question side-effect + nondeterministic
+  - Does db.commit()+refresh inside GET path.
+  - Fallback Question.created_at if hasattr else Question.id, but Question has no created_at (app/models/question.py:12-70) so always order_by(id).
+  - Concurrent GETs claim different is_used rows, pool exhausts -> permanent 404. Breaks idempotency.
+
+[C13] app/api/admin_game.py:25-37,62-72 + app/models/game_level.py:45-49 + app/schemas/admin_game.py:10,35 - unlock_requires type mismatch
+  - Model: unlock_requires UUID FK vs Schema LevelCreate/Update/AdminLevelResponse int|None.
+  - level_to_response(unlock_requires=UUID) -> Pydantic 500; create_level(unlock_requires=int) -> Postgres UUID type error.
+
+================================================================
+HIGH (likely 500 / wrong data / auth gap)
+================================================================
+
+[H1] app/db/database.py:9-12 - missing driver prefix handling
+  - create_engine(settings.DATABASE_URL) with no postgresql+psycopg:// handling.
+  - psycopg3 requires driver prefix; bare postgresql:// picks psycopg2 or fails.
+
+[H2] app/models/streak.py:20-25 - Streak.user_id missing FK
+  - unique+indexed but no ForeignKey("users.id"). Orphan streaks, no cascade delete.
+
+[H3] app/models/leaderboard_snapshot.py:41-45 - user_id UUID no FK
+  - Same as H2: orphan snapshots, no cascade.
+
+[H4] app/models/question.py:62-64 - used_date missing Date type
+  - mapped_column(nullable=True) with no Date type vs migration sa.Date().
+  - Relies on Mapped[date|None] inference, alembic autogenerate drift.
+
+[H5] app/models/leaderboard_snapshot.py:57-60, app/models/notification.py:50-54, app/models/audit_log.py:52-56 - naive datetime.utcnow
+  - default=datetime.utcnow (naive) for DateTime(timezone=True).
+  - Naive vs timestamptz warning/error. Use server_default=func.now() like User model.
+
+[H6] app/services/scoring_service.py:236-354 - scores on failed stages
+  - process_stage_score() calls update_user_score(+score_value) even when status=="failed".
+  - calculate_stage_score can return >0 on is_correct=False (time 20 + efficiency 10 + no_hint 10).
+  - Inflates total/daily/weekly/monthly leaderboard on failures.
+  - Parallel dead path app/services/game_service.py:192-238 submit_stage() uses different flat 100-hints*10 scoring. API uses only process_stage_score. Conflicting logic.
+
+[H7] app/schemas/game.py:38-42 vs app/schemas/scoring.py:4-15 + app/api/game.py:322-327 - SubmitStageRequest dead
+  - SubmitStageRequest(answer,time_taken,hints_used) dead; endpoint uses StageSubmissionRequest(answer,time_taken,operations_used).
+  - hints_used from body never submitted, scoring reads progress.hints_used. Clients send wrong field -> 422/ignored.
+
+[H8] app/services/game_service.py:144-147 - hardcoded passing score
+  - previous_progress.highest_score >=60 hardcoded. Should be previous_stage.passing_score / stage.passing_score. Custom passing scores ignored.
+
+[H9] app/api/game.py:374 + app/services/scoring_service.py:277-278 - attempts double-count risk
+  - progress.attempts+=1 in API but not in process_stage_score; game_service.submit_stage also does attempts+=1.
+  - Split responsibility: reuse causes double-count, direct service use causes zero-count.
+
+[H10] app/services/qotd_service.py:154-158,186-211 - streak on wrong answer + stale level
+  - update_streak() called before is_correct check; streak increments on wrong answer.
+  - user_score.xp+=points without calculate_player_level(). player_level stale for QOTD vs stage path (scoring_service.py:337-341 updates it).
+
+[H11] app/api/qotd.py:126-136 - answer disclosure
+  - Returns correct_answer + explanation even when is_correct==False. Gate on correctness if not intended.
+
+[H12] app/services/analytics_service.py:105-115 - outerjoin turned inner
+  - .outerjoin(...).where(UserProgress.status=="completed"). WHERE null-filters -> inner join.
+  - Levels with 0 completions disappear from level_completion. Move to join(on=...&status).
+
+[H13] app/services/leaderboard_service.py:47-54,69-71,141-147 - inactive users in counts
+  - total_users=count(UserScore) unfiltered but rows filters User.is_active, higher_scores unfiltered.
+  - total_users/total_pages/rank include deactivated users, inconsistent with entries.
+
+[H14] app/core/security.py:94-96 + app/api/auth.py:78-79 - OAuth2 docs broken
+  - OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login") but login takes JSON LoginRequest.
+  - Swagger Authorize sends OAuth2PasswordRequestForm -> 422.
+
+[H15] app/tasks/scheduled_tasks.py:1-16 + app/tasks/celery_app.py:28-44 - beat tasks stubs
+  - generate_daily_qotd/send_qotd_reminders return strings, no DB/Redis logic.
+  - Daily rotation, reminders, leaderboard resets never run; QOTD pool exhaustion inevitable.
+
+[H16] app/api/admin_analytics.py:35,55-68 - full table load + CSV injection
+  - db.query(User).all() loads entire table + csv.writer unsanitized.
+  - Deprecated Query API in SQLAlchemy 2.0 + OOM + CSV injection (=,+,-,@ in display_name/email).
+
+[H17] alembic/versions/768ade9ed101_initial_migration.py:21-25, alembic/versions/d54d6198763c_create_core_database_tables.py:21-25 - empty duplicate revisions
+  - Two empty pass revisions, duplicate message "create core database tables". Dead heads clutter history.
+
+[H18] app/core/admin_security.py:10 + missing seed - admin lockout
+  - role in {"admin","super_admin"} but auth_service.py:39 always role="player", no promote/bootstrap script.
+  - Admin routers unreachable after fresh deploy.
+
+[H19] app/main.py:53-76 - database_health leaks internals
+  - Returns detail={"status":...,"message":str(exc)} on 503. Leaks DB URL/driver internals to unauthenticated callers.
+
+================================================================
+MEDIUM (config / contract / maintainability)
+================================================================
+
+[M1] app/core/config.py:23 - INACTIVITY_TIMEOUT_MINUTES dead
+  - Never used. Dead config, misleading.
+
+[M2] app/services/auth_service.py:78-100 - refresh flow dead
+  - create_refresh_token issued but no /refresh endpoint / verify function. Clients forced re-login after 30m.
+
+[M3] app/core/config.py:16-18,36-41 + app/main.py:83-99 - CORS credentials + wildcard
+  - CORS_ORIGINS:str split + allow_credentials=True + allow_headers=[Authorization,Content-Type].
+  - CORS_ORIGINS="*" -> ["*"] + credentials rejected by browsers; missing headers break preflight.
+
+[M4] app/core/rate_limit.py:1-56 + app/api/auth.py:44-47,87-90 - in-memory rate limit
+  - defaultdict(list) + monotonic(), key=request.client.host.
+  - Bypassed with multiple uvicorn workers, memory leak (keys never evicted), spoofed behind proxy, window_seconds=60 hardcoded ignoring settings.
+
+[M5] app/services/qotd_service.py:103 - hasattr(Question,"created_at") always False
+  - Dead branch, signals schema drift.
+
+[M6] app/api/game.py:74-129 - GET /levels/{level_id} no response_model
+  - Returns raw dict, unvalidated contract, inconsistent with LevelResponse.
+
+[M7] app/api/admin_users.py:19-67, app/api/admin_analytics.py:22-27, app/api/admin_audit.py:17-43 - raw dict/list, no pagination total
+  - No response_model, no total for paginated lists. Client pagination broken.
+
+[M8] app/services/audit_service.py:6-28 - flush only + ip always None
+  - db.flush() only; log lost if later commit fails.
+  - ip_address always None (never passed from admin_users.py:124-133,161-170 / admin_game.py:77-87).
+
+[M9] app/services/user_service.py:53-60 - delete semantics unclear
+  - Soft-delete (is_active=False) but get_public_profile still exposes, JWTs remain valid until expiry (security.py:103-157 checks is_active on use, but no revocation list). Document expectation.
+
+[M10] alembic/env.py:9,13-16 - nonstandard import + env required
+  - from app import models (should be import app.models), config.set_main_option("sqlalchemy.url",settings.DATABASE_URL).
+  - Migrations require .env present; alembic.ini:89 sqlalchemy.url dead fallback never used.
+
+[M11] app/models/question.py:51-54, app/models/game_stage.py:46-50 - Postgres-only types
+  - ARRAY(String) + JSONB Postgres-only. Breaks SQLite/test envs; conflicts with PyMySQL requirement.
+
+[M12] app/main.py:35-46 - root/health no version prefix, no request_id/logging.
+
+[M13] app/core/security_middleware.py:1-19 - missing HSTS, CSP disabled, no X-Request-ID.
+
+================================================================
+LOW (hygiene / placeholders)
+================================================================
+
+[L1] alembic.ini:89 - placeholder sqlalchemy.url = driver://user:pass@localhost/dsa_arcade left in committed config.
+
+[L2] .gitignore:8 - .env.* ignores .env.example so example can't be committed; should be .env + .env.local only. Also missing celerybeat-schedule*, __pycache__/, .pytest_cache/ partial.
+
+[L3] Repo root has committed celerybeat-schedule.bak/.dat/.dir (binary shelf). Should be gitignored/removed.
+
+[L4] app/scripts/seed_qotd.py:79-88 - seed() add_all module-global list, no idempotency check, module import side-effect; app/scripts/ has no __init__.py, app/utils/__init__.py empty.
+
+[L5] app/models/game_level.py:73-82, app/models/user_progress.py:96-104 - missing cascade/relationship, N+1 in get_level (level.stages lazy load per level). UserProgress.level_id with no relationship to GameLevel.
+
+[L6] app/schemas/user.py:4-58 - UserProfileResponse/UserStatsResponse missing model_config={"from_attributes":True} (unlike schemas/auth.py:72-74), inconsistent construction.
+
+[L7] requirements.txt - unpinned transitive deps frozen (amqp, billiard, kombu, vine, click-repl etc.) + tzdata==2026.3 future pin; noisy, dependabot churn. Keep only direct deps.
+
+================================================================
+RECOMMENDED FIX ORDER:
+================================================================
+1. requirements.txt cleanup (C1-C5, L7) + test pip install
+2. config + .env.example (C6, M1, M3)
+3. security UUID fix + bcrypt + JWT single lib (C4, C3, C7, H14)
+4. notifications route order (C9) + auth error handling (C10)
+5. game unlock + scoring (C8, H6-H9) + admin_game types (C13)
+6. QOTD constraints + idempotency (C11, C12, H10, H11, H15)
+7. DB FKs, datetime defaults, driver prefix (H1-H5, M11)
+8. Leaderboard/analytics correctness (H12, H13, H16)
+9. Alembic squash empties (H17) + admin bootstrap (H18) + health leak (H19)
+10. Medium/Low hardening (M2, M4-M13, L1-L6)
+
+END OF FILE
