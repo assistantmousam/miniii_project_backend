@@ -35,12 +35,6 @@ class StartStageResponse(BaseModel):
     message: str
 
 
-class SubmitStageRequest(BaseModel):
-    answer: dict
-    time_taken: int = 0
-    hints_used: int = 0
-
-
 class SubmitStageResponse(BaseModel):
     stage_id: str
     status: str

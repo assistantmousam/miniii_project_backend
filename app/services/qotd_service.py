@@ -1,4 +1,3 @@
-
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -6,14 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.models.question import Question
 from app.models.qotd_attempt import QotDAttempt
-from app.models.qotd_history import QOTDHistory
 from app.models.streak import Streak
 from app.models.user_score import UserScore
 
 
-# =========================================================
+# ============================================================
 # XP THRESHOLDS
-# =========================================================
+# ============================================================
 
 XP_THRESHOLDS = [
     100,
@@ -26,17 +24,17 @@ XP_THRESHOLDS = [
 ]
 
 
-# =========================================================
+# ============================================================
 # TODAY
-# =========================================================
+# ============================================================
 
 def get_today_utc() -> date:
     return datetime.now(timezone.utc).date()
 
 
-# =========================================================
+# ============================================================
 # PLAYER LEVEL
-# =========================================================
+# ============================================================
 
 def calculate_level_from_xp(xp: int) -> int:
     level = 1
@@ -50,9 +48,9 @@ def calculate_level_from_xp(xp: int) -> int:
     return level
 
 
-# =========================================================
+# ============================================================
 # STREAK
-# =========================================================
+# ============================================================
 
 def get_or_create_streak(
     db: Session,
@@ -138,9 +136,9 @@ def update_streak(
     return streak
 
 
-# =========================================================
+# ============================================================
 # TODAY'S QUESTION
-# =========================================================
+# ============================================================
 
 def get_today_question(
     db: Session,
@@ -148,27 +146,23 @@ def get_today_question(
 
     today = get_today_utc()
 
-    # -----------------------------------------------------
-    # First check whether today's QOTD already exists
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Check whether today's question already exists
+    # --------------------------------------------------------
 
     existing = db.scalar(
-        select(QOTDHistory).where(
-            QOTDHistory.date == today
+        select(Question).where(
+            Question.used_date == today,
+            Question.is_qotd_eligible.is_(True),
         )
     )
 
     if existing is not None:
+        return existing
 
-        return db.scalar(
-            select(Question).where(
-                Question.id == existing.question_id
-            )
-        )
-
-    # -----------------------------------------------------
+    # --------------------------------------------------------
     # Select an unused eligible question
-    # -----------------------------------------------------
+    # --------------------------------------------------------
 
     question = db.scalar(
         select(Question)
@@ -182,12 +176,11 @@ def get_today_question(
         )
     )
 
-    # -----------------------------------------------------
-    # Fallback: reuse oldest eligible question
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Fallback: reuse oldest question
+    # --------------------------------------------------------
 
     if question is None:
-
         question = db.scalar(
             select(Question)
             .where(
@@ -199,32 +192,30 @@ def get_today_question(
             .with_for_update()
         )
 
+    # --------------------------------------------------------
+    # No question available
+    # --------------------------------------------------------
+
     if question is None:
         return None
 
-    # -----------------------------------------------------
+    # --------------------------------------------------------
     # Mark question as today's QOTD
-    # -----------------------------------------------------
+    # --------------------------------------------------------
 
     question.used_date = today
 
-    history = QOTDHistory(
-        date=today,
-        question_id=question.id,
-    )
+    # Do not commit here.
+    # The submit/API layer controls the transaction.
 
-    db.add(history)
-
-    # Do NOT commit here.
-    # The submit/API layer will commit.
     db.flush()
 
     return question
 
 
-# =========================================================
+# ============================================================
 # GET USER TODAY'S ATTEMPT
-# =========================================================
+# ============================================================
 
 def get_user_attempt(
     db: Session,
@@ -240,9 +231,9 @@ def get_user_attempt(
     )
 
 
-# =========================================================
+# ============================================================
 # GET OR CREATE USER SCORE
-# =========================================================
+# ============================================================
 
 def get_or_create_user_score(
     db: Session,
@@ -256,7 +247,6 @@ def get_or_create_user_score(
     )
 
     if user_score is None:
-
         user_score = UserScore(
             user_id=user_id,
             total_score=0,
@@ -273,44 +263,42 @@ def get_or_create_user_score(
     return user_score
 
 
-# =========================================================
+# ============================================================
 # CHECK ANSWER
-# =========================================================
+# ============================================================
 
 def check_answer(
     question: Question,
-    answer,
+    answer: str,
 ) -> bool:
 
-    return answer == question.correct_answer
+    if answer is None:
+        return False
+
+    user_answer = str(answer).strip()
+
+    correct_answer = str(
+        question.correct_answer
+    ).strip()
+
+    return user_answer == correct_answer
 
 
-# =========================================================
+# ============================================================
 # SUBMIT QOTD
-# =========================================================
+# ============================================================
 
 def submit_qotd(
     db: Session,
     user_id: int,
-    answer,
+    answer: str,
 ) -> QotDAttempt:
 
     today = get_today_utc()
 
-    # -----------------------------------------------------
-    # GET TODAY'S QUESTION
-    # -----------------------------------------------------
-
-    qotd = get_today_question(db)
-
-    if qotd is None:
-        raise ValueError(
-            "Today's Question of the Day is not available"
-        )
-
-    # -----------------------------------------------------
-    # CHECK WHETHER USER ALREADY ATTEMPTED TODAY
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Check duplicate attempt FIRST
+    # --------------------------------------------------------
 
     existing_attempt = get_user_attempt(
         db,
@@ -324,26 +312,39 @@ def submit_qotd(
             "Question of the Day"
         )
 
-    # -----------------------------------------------------
-    # CHECK ANSWER
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Get today's question
+    # --------------------------------------------------------
+
+    qotd = get_today_question(db)
+
+    if qotd is None:
+        raise ValueError(
+            "Today's Question of the Day is not available"
+        )
+
+    # --------------------------------------------------------
+    # Check answer
+    # --------------------------------------------------------
 
     is_correct = check_answer(
         qotd,
         answer,
     )
 
-    base_points = qotd.points
+    base_points = qotd.points or 0
 
     points_earned = 0
+
     multiplier = 1.0
 
-    # -----------------------------------------------------
-    # ONLY CORRECT ANSWER UPDATES STREAK
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Correct answer
+    # --------------------------------------------------------
 
     if is_correct:
 
+        # Streak changes ONLY on correct answer
         streak = update_streak(
             db,
             user_id,
@@ -358,9 +359,9 @@ def submit_qotd(
             base_points * multiplier
         )
 
-    # -----------------------------------------------------
-    # CREATE ATTEMPT
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Create attempt
+    # --------------------------------------------------------
 
     attempt = QotDAttempt(
         user_id=user_id,
@@ -371,17 +372,14 @@ def submit_qotd(
         base_points=base_points,
         multiplier=multiplier,
         points_earned=points_earned,
-        submitted_at=datetime.now(
-            timezone.utc
-        ),
+        submitted_at=datetime.now(timezone.utc),
     )
 
     db.add(attempt)
 
-    # -----------------------------------------------------
-    # UPDATE USER SCORE + XP
-    # ONLY WHEN CORRECT
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Update score and XP ONLY if correct
+    # --------------------------------------------------------
 
     if is_correct:
 
@@ -406,13 +404,12 @@ def submit_qotd(
             )
         )
 
-    # -----------------------------------------------------
-    # COMMIT
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Commit
+    # --------------------------------------------------------
 
     db.commit()
 
     db.refresh(attempt)
 
     return attempt
-

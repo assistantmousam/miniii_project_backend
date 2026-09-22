@@ -2,38 +2,41 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import (
-    hash_password,
-    verify_password,
     create_access_token,
     create_refresh_token,
+    hash_password,
+    verify_password,
 )
 from app.models.user import User
-from app.schemas.auth import RegisterRequest, LoginRequest
+from app.schemas.auth import LoginRequest, RegisterRequest
 
 
 def register_user(
     db: Session,
     data: RegisterRequest,
 ) -> User:
+    username = data.username.strip()
+    email = str(data.email).lower().strip()
+
     existing_user = db.scalar(
         select(User).where(
             or_(
-                User.email == data.email,
-                User.username == data.username,
+                User.email == email,
+                User.username == username,
             )
         )
     )
 
     if existing_user:
-        if existing_user.email == data.email:
+        if existing_user.email == email:
             raise ValueError("Email already registered")
 
-        if existing_user.username == data.username:
+        if existing_user.username == username:
             raise ValueError("Username already taken")
 
     user = User(
-        email=data.email,
-        username=data.username,
+        email=email,
+        username=username,
         password_hash=hash_password(data.password),
         display_name=data.display_name,
         role="player",
@@ -42,9 +45,13 @@ def register_user(
         auth_provider="local",
     )
 
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        raise
 
     return user
 
@@ -54,6 +61,8 @@ def authenticate_user(
     email: str,
     password: str,
 ) -> User:
+    email = email.strip().lower()
+
     user = db.scalar(
         select(User).where(User.email == email)
     )
@@ -66,7 +75,10 @@ def authenticate_user(
             "This account does not use password authentication"
         )
 
-    if not verify_password(password, user.password_hash):
+    if not verify_password(
+        password,
+        user.password_hash,
+    ):
         raise ValueError("Incorrect email or password")
 
     if not user.is_active:
@@ -81,20 +93,16 @@ def login_user(
 ) -> dict:
     user = authenticate_user(
         db=db,
-        email=data.email,
+        email=str(data.email),
         password=data.password,
     )
 
-    access_token = create_access_token(
-        str(user.id)
-    )
-
-    refresh_token = create_refresh_token(
-        str(user.id)
-    )
+    access_token = create_access_token(str(user.id))
+    refresh_token = create_refresh_token(str(user.id))
 
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "user": user,
     }

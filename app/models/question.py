@@ -1,8 +1,10 @@
-import uuid
 
+# app/models/question.py
+
+import uuid
 from datetime import date
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,6 +48,7 @@ class Question(Base):
     points: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+        default=10,
     )
 
     tags: Mapped[list[str] | None] = mapped_column(
@@ -55,12 +58,21 @@ class Question(Base):
 
     is_used: Mapped[bool] = mapped_column(
         Boolean,
-        default=False,
         nullable=False,
+        default=False,
     )
 
     used_date: Mapped[date | None] = mapped_column(
+        Date,
         nullable=True,
+        index=True,
+    )
+
+    is_qotd_eligible: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
     )
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -68,3 +80,4 @@ class Question(Base):
         ForeignKey("users.id"),
         nullable=True,
     )
+

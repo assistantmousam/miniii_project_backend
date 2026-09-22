@@ -1,5 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
 import re
+import uuid
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -27,16 +29,24 @@ class RegisterRequest(BaseModel):
             raise ValueError("Password must be at least 8 characters")
 
         if not re.search(r"[A-Z]", value):
-            raise ValueError("Password must contain an uppercase letter")
+            raise ValueError(
+                "Password must contain an uppercase letter"
+            )
 
         if not re.search(r"[a-z]", value):
-            raise ValueError("Password must contain a lowercase letter")
+            raise ValueError(
+                "Password must contain a lowercase letter"
+            )
 
         if not re.search(r"\d", value):
-            raise ValueError("Password must contain a number")
+            raise ValueError(
+                "Password must contain a number"
+            )
 
         if not re.search(r"[^A-Za-z0-9]", value):
-            raise ValueError("Password must contain a special character")
+            raise ValueError(
+                "Password must contain a special character"
+            )
 
         return value
 
@@ -51,7 +61,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     username: str
     email: EmailStr
     display_name: str | None = None

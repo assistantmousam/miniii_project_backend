@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models.game_level import GameLevel
@@ -9,6 +9,10 @@ from app.models.question import Question
 from app.models.user import User
 from app.models.user_progress import UserProgress
 
+
+# ============================================================
+# ADMIN OVERVIEW
+# ============================================================
 
 def get_admin_overview(db: Session) -> dict:
     total_users = db.scalar(
@@ -56,24 +60,34 @@ def get_admin_overview(db: Session) -> dict:
     }
 
 
+# ============================================================
+# USER ACTIVITY
+# ============================================================
+
 def get_user_activity(db: Session) -> dict:
     now = datetime.now(timezone.utc)
 
     one_day_ago = now - timedelta(days=1)
     thirty_days_ago = now - timedelta(days=30)
 
+    # Daily Active Users
     dau = db.scalar(
         select(
-            func.count(func.distinct(UserProgress.user_id))
+            func.count(
+                func.distinct(UserProgress.user_id)
+            )
         ).where(
             UserProgress.completed_at.is_not(None),
             UserProgress.completed_at >= one_day_ago,
         )
     ) or 0
 
+    # Monthly Active Users
     mau = db.scalar(
         select(
-            func.count(func.distinct(UserProgress.user_id))
+            func.count(
+                func.distinct(UserProgress.user_id)
+            )
         ).where(
             UserProgress.completed_at.is_not(None),
             UserProgress.completed_at >= thirty_days_ago,
@@ -86,17 +100,24 @@ def get_user_activity(db: Session) -> dict:
     }
 
 
+# ============================================================
+# LEVEL COMPLETION STATISTICS
+# ============================================================
+
 def get_level_completion_stats(
     db: Session,
 ) -> list[dict]:
+
     rows = db.execute(
         select(
             GameLevel.id,
             GameLevel.level_number,
             GameLevel.title,
-            func.count(UserProgress.id).label(
-                "total_completions"
-            ),
+
+            func.count(
+                UserProgress.id
+            ).label("total_completions"),
+
             func.coalesce(
                 func.avg(UserProgress.highest_score),
                 0,
@@ -108,10 +129,10 @@ def get_level_completion_stats(
         )
         .outerjoin(
             UserProgress,
-            UserProgress.stage_id == GameStage.id,
-        )
-        .where(
-            UserProgress.status == "completed"
+            and_(
+                UserProgress.stage_id == GameStage.id,
+                UserProgress.status == "completed",
+            ),
         )
         .group_by(
             GameLevel.id,
@@ -138,17 +159,23 @@ def get_level_completion_stats(
     ]
 
 
+# ============================================================
+# POPULAR LEVELS
+# ============================================================
+
 def get_popular_levels(
     db: Session,
 ) -> list[dict]:
+
     rows = db.execute(
         select(
             GameLevel.id,
             GameLevel.level_number,
             GameLevel.title,
-            func.count(UserProgress.id).label(
-                "attempts"
-            ),
+
+            func.count(
+                UserProgress.id
+            ).label("attempts"),
         )
         .join(
             GameStage,
@@ -164,7 +191,9 @@ def get_popular_levels(
             GameLevel.title,
         )
         .order_by(
-            func.count(UserProgress.id).desc()
+            func.count(
+                UserProgress.id
+            ).desc()
         )
         .limit(10)
     ).all()
@@ -180,9 +209,14 @@ def get_popular_levels(
     ]
 
 
+# ============================================================
+# ADMIN ANALYTICS
+# ============================================================
+
 def get_admin_analytics(
     db: Session,
 ) -> dict:
+
     return {
         "overview": get_admin_overview(db),
         "activity": get_user_activity(db),

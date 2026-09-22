@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +12,10 @@ from app.db.database import get_db
 from app.models.user import User
 
 
+# ============================================================
+# CONFIG
+# ============================================================
+
 ALGORITHM = settings.JWT_ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
 REFRESH_TOKEN_EXPIRE_DAYS = settings.REFRESH_TOKEN_EXPIRE_DAYS
@@ -20,32 +24,47 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 # ============================================================
-# PASSWORD
+# PASSWORD HASHING
 # ============================================================
 
 def hash_password(password: str) -> str:
     password_bytes = password.encode("utf-8")
 
+    # bcrypt has a 72-byte password limit
+    if len(password_bytes) > 72:
+        raise ValueError(
+            "Password cannot be longer than 72 bytes"
+        )
+
     hashed = bcrypt.hashpw(
         password_bytes,
-        bcrypt.gensalt()
+        bcrypt.gensalt(),
     )
 
     return hashed.decode("utf-8")
 
 
-def verify_password(password: str, password_hash: str) -> bool:
+def verify_password(
+    password: str,
+    password_hash: str,
+) -> bool:
     try:
+        password_bytes = password.encode("utf-8")
+
+        if len(password_bytes) > 72:
+            return False
+
         return bcrypt.checkpw(
-            password.encode("utf-8"),
+            password_bytes,
             password_hash.encode("utf-8"),
         )
+
     except Exception:
         return False
 
 
 # ============================================================
-# TOKENS
+# ACCESS TOKEN
 # ============================================================
 
 def create_access_token(user_id: str) -> str:
@@ -67,6 +86,10 @@ def create_access_token(user_id: str) -> str:
     )
 
 
+# ============================================================
+# REFRESH TOKEN
+# ============================================================
+
 def create_refresh_token(user_id: str) -> str:
     now = datetime.now(timezone.utc)
 
@@ -86,6 +109,10 @@ def create_refresh_token(user_id: str) -> str:
     )
 
 
+# ============================================================
+# DECODE TOKEN
+# ============================================================
+
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(
@@ -93,6 +120,7 @@ def decode_token(token: str) -> dict:
             settings.JWT_SECRET_KEY,
             algorithms=[ALGORITHM],
         )
+
     except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -100,7 +128,13 @@ def decode_token(token: str) -> dict:
         ) from exc
 
 
-def refresh_access_token(refresh_token: str) -> dict:
+# ============================================================
+# REFRESH ACCESS TOKEN
+# ============================================================
+
+def refresh_access_token(
+    refresh_token: str,
+) -> dict:
     payload = decode_token(refresh_token)
 
     if payload.get("type") != "refresh":
@@ -135,13 +169,15 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
 
-    if not credentials:
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
 
-    payload = decode_token(credentials.credentials)
+    payload = decode_token(
+        credentials.credentials
+    )
 
     if payload.get("type") != "access":
         raise HTTPException(
@@ -158,10 +194,12 @@ def get_current_user(
         )
 
     user = db.scalar(
-        select(User).where(User.id == user_id)
+        select(User).where(
+            User.id == user_id
+        )
     )
 
-    if not user:
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
