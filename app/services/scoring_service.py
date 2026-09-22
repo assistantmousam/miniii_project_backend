@@ -9,15 +9,7 @@ from app.models.user_progress import UserProgress
 from app.models.user_score import UserScore
 
 
-XP_THRESHOLDS = [
-    100,
-    300,
-    600,
-    1000,
-    2000,
-    5000,
-    10000,
-]
+XP_THRESHOLDS = [100, 300, 600, 1000, 2000, 5000, 10000]
 
 
 def calculate_player_level(xp: int) -> int:
@@ -32,13 +24,8 @@ def calculate_player_level(xp: int) -> int:
     return level
 
 
-def calculate_correctness(
-    is_correct: bool,
-) -> float:
-    if is_correct:
-        return 60.0
-
-    return 0.0
+def calculate_correctness(is_correct: bool) -> float:
+    return 60.0 if is_correct else 0.0
 
 
 def calculate_time_bonus(
@@ -91,10 +78,7 @@ def calculate_efficiency(
 def calculate_no_hint_score(
     hints_used: int,
 ) -> float:
-    if hints_used == 0:
-        return 10.0
-
-    return 0.0
+    return 10.0 if hints_used == 0 else 0.0
 
 
 def calculate_stage_score(
@@ -245,23 +229,19 @@ def process_stage_score(
 
     previous_status = progress.status
 
-    # Check whether the level was already completed
-    # before processing this submission.
     level_was_completed = has_completed_level(
         db,
         user_id,
         stage.level_id,
     )
 
-    # Safely read optimal_operations.
+    optimal_operations = None
+
     if stage.challenge_data:
         optimal_operations = stage.challenge_data.get(
             "optimal_operations"
         )
-    else:
-        optimal_operations = None
 
-    # Calculate stage score.
     breakdown = calculate_stage_score(
         is_correct=is_correct,
         time_taken=time_taken,
@@ -273,37 +253,41 @@ def process_stage_score(
 
     score_value = breakdown["total_score"]
 
-    # Update progress information.
     progress.score = score_value
     progress.time_taken = time_taken
 
-    if score_value > progress.highest_score:
+    if score_value > (
+        progress.highest_score or 0
+    ):
         progress.highest_score = score_value
 
-    # Determine whether the stage passed.
-    if (
+    is_passing = (
         is_correct
         and score_value >= stage.passing_score
-    ):
-        progress.status = "completed"
+    )
 
+    if is_passing:
+        progress.status = "completed"
         progress.completed_at = datetime.now(
             timezone.utc
         )
     else:
         progress.status = "failed"
 
-    # Update user's score.
-    user_score = update_user_score(
+    user_score = get_or_create_user_score(
         db,
         user_id,
-        score_value,
     )
+
+    if is_passing:
+        user_score = update_user_score(
+            db,
+            user_id,
+            score_value,
+        )
 
     xp_earned = 0
 
-    # Give stage XP only for the first successful
-    # completion of the stage.
     stage_completed_first_time = (
         progress.status == "completed"
         and previous_status != "completed"
@@ -312,8 +296,6 @@ def process_stage_score(
     if stage_completed_first_time:
         xp_earned += 5
 
-        # Make the new progress status available
-        # to the level-completion query.
         db.flush()
 
         level_is_completed = has_completed_level(
@@ -322,15 +304,12 @@ def process_stage_score(
             stage.level_id,
         )
 
-        # Give 50 bonus XP only when this submission
-        # completes the entire level for the first time.
         if (
             level_is_completed
             and not level_was_completed
         ):
             xp_earned += 50
 
-    # Update XP and player level.
     if xp_earned > 0:
         user_score.xp += xp_earned
 
@@ -340,10 +319,8 @@ def process_stage_score(
             )
         )
 
-    # Save everything.
     db.commit()
 
-    # Refresh database objects.
     db.refresh(progress)
     db.refresh(user_score)
 
@@ -352,5 +329,4 @@ def process_stage_score(
         xp_earned,
         user_score,
     )
-
 

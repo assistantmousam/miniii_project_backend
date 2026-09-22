@@ -18,19 +18,11 @@ from app.api.admin_game import router as admin_game_router
 from app.api.admin_analytics import router as admin_analytics_router
 
 
-# =========================
-# FastAPI Application
-# =========================
-
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
 )
 
-
-# =========================
-# Basic API
-# =========================
 
 @app.get("/")
 def root():
@@ -45,10 +37,6 @@ def health():
         "status": "healthy"
     }
 
-
-# =========================
-# Database Health
-# =========================
 
 @app.get("/health/database")
 def database_health():
@@ -76,41 +64,18 @@ def database_health():
         db.close()
 
 
-# =========================
-# CORS
-# =========================
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=[
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "OPTIONS",
-    ],
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
-
-# =========================
-# Security Headers
-# =========================
 
 app.add_middleware(
-    SecurityHeadersMiddleware,
+    SecurityHeadersMiddleware
 )
 
-
-# =========================
-# API Routers
-# =========================
 
 app.include_router(auth_router)
 app.include_router(users_router)

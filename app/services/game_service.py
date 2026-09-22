@@ -1,5 +1,5 @@
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.game_level import GameLevel
@@ -58,14 +58,13 @@ def is_level_unlocked(
     user_id,
     level: GameLevel,
 ) -> bool:
-    # Level 1 is always unlocked.
+
     if level.level_number == 1:
         return True
 
     previous_level = db.scalar(
         select(GameLevel).where(
-            GameLevel.level_number
-            == level.level_number - 1,
+            GameLevel.level_number == level.level_number - 1,
             GameLevel.is_active.is_(True),
         )
     )
@@ -82,19 +81,16 @@ def is_level_unlocked(
     if not stages:
         return False
 
-    # The previous level is unlocked only when
-    # all of its stages are completed.
     completed_count = db.scalar(
-        select(UserProgress.id)
+        select(func.count(UserProgress.id))
         .where(
             UserProgress.user_id == user_id,
             UserProgress.level_id == previous_level.id,
             UserProgress.status == "completed",
         )
-        .limit(1)
     )
 
-    return completed_count is not None
+    return completed_count == len(stages)
 
 
 def is_stage_unlocked(
@@ -102,6 +98,7 @@ def is_stage_unlocked(
     user_id,
     stage: GameStage,
 ) -> bool:
+
     level = get_level_by_id(
         db,
         stage.level_id,
@@ -117,15 +114,13 @@ def is_stage_unlocked(
     ):
         return False
 
-    # First stage is unlocked when the level is unlocked.
     if stage.stage_number == 1:
         return True
 
     previous_stage = db.scalar(
         select(GameStage).where(
             GameStage.level_id == stage.level_id,
-            GameStage.stage_number
-            == stage.stage_number - 1,
+            GameStage.stage_number == stage.stage_number - 1,
         )
     )
 
@@ -152,6 +147,7 @@ def start_stage(
     user_id,
     stage: GameStage,
 ) -> UserProgress:
+
     progress = get_user_stage_progress(
         db,
         user_id,
@@ -174,7 +170,6 @@ def start_stage(
         db.add(progress)
 
     else:
-        # Do not reset an already completed stage.
         if progress.status == "completed":
             return progress
 
@@ -213,7 +208,6 @@ def submit_stage(
     if is_correct:
         score = 100
 
-        # 10 points penalty for each hint.
         score -= hints_used * 10
         score = max(score, 0)
 
@@ -236,4 +230,3 @@ def submit_stage(
     db.refresh(progress)
 
     return score, is_correct
-

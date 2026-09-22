@@ -1,4 +1,3 @@
-
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,6 +39,10 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# LEVELS
+# ============================================================
+
 @router.get(
     "/levels",
     response_model=list[LevelResponse],
@@ -70,6 +73,10 @@ def get_levels(
         for level in levels
     ]
 
+
+# ============================================================
+# SINGLE LEVEL
+# ============================================================
 
 @router.get("/levels/{level_id}")
 def get_level(
@@ -129,6 +136,10 @@ def get_level(
     }
 
 
+# ============================================================
+# SINGLE STAGE
+# ============================================================
+
 @router.get(
     "/stages/{stage_id}",
     response_model=StageResponse,
@@ -172,6 +183,10 @@ def get_stage(
     )
 
 
+# ============================================================
+# START STAGE
+# ============================================================
+
 @router.post(
     "/stages/{stage_id}/start",
     response_model=StartStageResponse,
@@ -211,6 +226,10 @@ def start_game_stage(
         message="Stage started successfully",
     )
 
+
+# ============================================================
+# HINT
+# ============================================================
 
 @router.post(
     "/stages/{stage_id}/hint",
@@ -280,6 +299,10 @@ def get_hint(
     )
 
 
+# ============================================================
+# SOLUTION
+# ============================================================
+
 @router.get(
     "/stages/{stage_id}/solution",
     response_model=SolutionResponse,
@@ -314,6 +337,10 @@ def get_solution(
         solution_data=stage.solution_data or {},
     )
 
+
+# ============================================================
+# SUBMIT STAGE
+# ============================================================
 
 @router.post(
     "/stages/{stage_id}/submit",
@@ -402,4 +429,3 @@ def submit_game_stage(
             else "Stage failed. You can retry."
         ),
     )
-

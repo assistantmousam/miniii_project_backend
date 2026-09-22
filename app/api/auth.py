@@ -1,73 +1,132 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.core.rate_limit import (
-    check_login_rate_limit,
-    check_register_rate_limit,
-)
 from app.db.database import get_db
+from app.models.user import User
 from app.schemas.auth import (
-    RegisterRequest,
-    UserResponse,
     LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
     TokenResponse,
+    UserResponse,
 )
-from app.services.auth_service import (
-    register_user,
-    login_user,
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    get_current_user,
+    hash_password,
+    refresh_access_token,
+    verify_password,
 )
 
 
 router = APIRouter(
     prefix="/api/v1/auth",
-    tags=["Authentication"],
+    tags=["Auth"],
 )
 
 
+# ============================================================
+# CHECK USERNAME
+# ============================================================
+
+@router.get("/check-username")
+def check_username(
+    username: str = Query(..., min_length=3, max_length=20),
+    db: Session = Depends(get_db),
+):
+    username = username.strip()
+
+    user = db.scalar(
+        select(User).where(User.username == username)
+    )
+
+    if user:
+        return {
+            "available": False,
+            "message": "Username is already taken",
+        }
+
+    return {
+        "available": True,
+        "message": "Username available",
+    }
+
+
+# ============================================================
+# REGISTER
+# ============================================================
+
 @router.post(
     "/register",
-    response_model=UserResponse,
+    response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def register(
     data: RegisterRequest,
-    request: Request,
     db: Session = Depends(get_db),
 ):
-    client_ip = (
-        request.client.host
-        if request.client
-        else "unknown"
+    username = data.username.strip()
+    email = str(data.email).lower().strip()
+
+    existing_username = db.scalar(
+        select(User).where(User.username == username)
     )
 
-    check_register_rate_limit(
-        key=client_ip,
-        max_attempts=settings.RATE_LIMIT_REGISTER,
+    if existing_username:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username is already taken",
+        )
+
+    existing_email = db.scalar(
+        select(User).where(User.email == email)
+    )
+
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered",
+        )
+
+    user = User(
+        username=username,
+        email=email,
+        password_hash=hash_password(data.password),
+        display_name=data.display_name,
+        role="learner",
+        is_active=True,
     )
 
     try:
-        user = register_user(
-            db,
-            data,
-        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-        return UserResponse(
-            id=str(user.id),
-            email=user.email,
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            is_verified=user.is_verified,
-            is_active=user.is_active,
-        )
+    except IntegrityError:
+        db.rollback()
 
-    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username or email already exists",
+        )
 
+    access_token = create_access_token(str(user.id))
+    refresh_token = create_refresh_token(str(user.id))
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+# ============================================================
+# LOGIN
+# ============================================================
 
 @router.post(
     "/login",
@@ -75,21 +134,77 @@ def register(
 )
 def login(
     data: LoginRequest,
-    request: Request,
     db: Session = Depends(get_db),
 ):
-    client_ip = (
-        request.client.host
-        if request.client
-        else "unknown"
+    email = str(data.email).lower().strip()
+
+    user = db.scalar(
+        select(User).where(User.email == email)
     )
 
-    check_login_rate_limit(
-        key=client_ip,
-        max_attempts=settings.RATE_LIMIT_LOGIN,
-    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
 
-    return login_user(
-        db=db,
-        data=data,
-    )
+    if not verify_password(
+        data.password,
+        user.password_hash,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive",
+        )
+
+    access_token = create_access_token(str(user.id))
+    refresh_token = create_refresh_token(str(user.id))
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+# ============================================================
+# REFRESH
+# ============================================================
+
+@router.post("/refresh")
+def refresh(
+    data: RefreshTokenRequest,
+):
+    return refresh_access_token(data.refresh_token)
+
+
+# ============================================================
+# ME
+# ============================================================
+
+@router.get(
+    "/me",
+    response_model=UserResponse,
+)
+def me(
+    current_user: User = Depends(get_current_user),
+):
+    return current_user
+
+
+# ============================================================
+# LOGOUT
+# ============================================================
+
+@router.post("/logout")
+def logout():
+    return {
+        "message": "Logged out successfully"
+    }
